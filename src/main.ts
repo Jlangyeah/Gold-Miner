@@ -21,6 +21,7 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 canvas.addEventListener('pointerdown', () => game.press());
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') {
     e.preventDefault();
