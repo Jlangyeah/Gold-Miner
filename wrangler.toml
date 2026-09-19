@@ -1,0 +1,8 @@
+name = "gold-miner"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-09-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "goldminer"
+database_id = "a8815608-6559-4917-8d34-3ae181c67e70"

@@ -1,4 +1,12 @@
 import { AudioEngine } from './audio';
+import {
+  cloudDownload,
+  cloudUpload,
+  fetchLeaderboard,
+  nickname,
+  setNickname,
+  submitScore,
+} from './cloud';
 import { ANCHOR, HIT_RADIUS, LEVEL_TIME, itemArea, targetFor, view } from './constants';
 import { generateLevel } from './generation';
 import { Hook } from './hook';
@@ -13,6 +21,11 @@ import { SaveData, clearProgress, loadSave, writeSave } from './save';
 import { Treasure } from './types';
 
 type State = 'menu' | 'playing' | 'result' | 'shop';
+
+const esc = (s: string) =>
+  s.replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!
+  );
 
 interface ShopEntry {
   key: 'coffee' | 'speed' | 'tnt' | 'compass' | 'ball' | 'clover';
@@ -185,6 +198,7 @@ export class Game {
       writeSave(this.save);
       this.state = 'result';
       this.audio.win();
+      submitScore(this.level, this.money, nickname());
       this.showResult(true);
     } else {
       this.state = 'result';
@@ -273,12 +287,30 @@ export class Game {
     this.audio.click();
     if (action === 'start') this.startLevel();
     else if (action === 'shop') this.showShop();
-    else if (action === 'menu') {
-      this.state = 'menu';
-      this.showMenu();
-    }
+    else if (action === 'menu') this.showMenu();
     else if (action === 'mute') this.toggleMute();
+    else if (action === 'board') this.showLeaderboard();
+    else if (action === 'cloud-up') this.doCloudUpload();
+    else if (action === 'cloud-down') this.doCloudDownload();
     else if (action.startsWith('buy:')) this.buy(SHOP.find((s) => s.key === action.slice(4))!);
+  }
+
+  private async doCloudUpload() {
+    this.setStatus('上传中…');
+    const ok = await cloudUpload(this.save, this.readNick());
+    this.setStatus(ok ? '✅ 已上传到云端' : '❌ 上传失败，请检查网络');
+  }
+
+  private async doCloudDownload() {
+    this.setStatus('读取中…');
+    const d = await cloudDownload();
+    if (!d) {
+      this.setStatus('云端暂无存档');
+      return;
+    }
+    this.save = d;
+    writeSave(d);
+    this.showMenu('✅ 已恢复云端存档');
   }
 
   private buy(entry: ShopEntry) {
@@ -304,16 +336,61 @@ export class Game {
     this.overlay.classList.add('show');
   }
 
-  private showMenu() {
+  private showMenu(msg = '') {
     this.state = 'menu';
     const cont = this.save.level > 1 ? `继续 · 第 ${this.save.level} 关` : '开始游戏';
     this.showOverlay(`
       <div class="card">
         <h1>⛏️ 黄金矿工</h1>
         <p>经典玩法复刻 · 点击/空格 放钩</p>
-        <p style="margin-top:10px">最高纪录：${this.save.high ? `第 <b>${this.save.high}</b> 关` : '暂无'} · 存款 <b>$${this.save.money}</b></p>
+        <p>最高纪录：${this.save.high ? `第 <b>${this.save.high}</b> 关` : '暂无'} · 存款 <b>$${this.save.money}</b></p>
         <button class="btn" data-action="start">${cont}</button>
-        <div class="mute-row"><button class="btn" style="font-size:14px;padding:6px 18px" data-action="mute">🔊 音效：${this.save.mute ? '关' : '开'}（M）</button></div>
+        <p style="margin-top:12px"><input id="nick" class="nick" maxlength="12" placeholder="你的矿工名" value="${esc(nickname())}"></p>
+        <div class="cloud-row">
+          <button class="btn small" data-action="cloud-up">☁️ 上传存档</button>
+          <button class="btn small" data-action="cloud-down">☁️ 读取存档</button>
+          <button class="btn small" data-action="board">🏆 排行榜</button>
+        </div>
+        <p id="cloud-status" class="cloud-status">${esc(msg)}</p>
+        <div class="mute-row"><button class="btn small" data-action="mute">🔊 音效：${this.save.mute ? '关' : '开'}（M）</button></div>
+      </div>`);
+  }
+
+  private readNick(): string {
+    const el = document.getElementById('nick') as HTMLInputElement | null;
+    const v = el?.value?.trim() ?? '';
+    setNickname(v);
+    return v || '无名矿工';
+  }
+
+  private setStatus(text: string) {
+    const el = document.getElementById('cloud-status');
+    if (el) el.textContent = text;
+  }
+
+  private async showLeaderboard() {
+    this.state = 'menu';
+    this.showOverlay('<div class="card"><h2>🏆 全球排行榜</h2><p>加载中…</p></div>');
+    const list = await fetchLeaderboard();
+    if (list === null) {
+      this.showOverlay(
+        '<div class="card"><h2>🏆 全球排行榜</h2><p>网络不可用</p><button class="btn" data-action="menu">返回</button></div>'
+      );
+      return;
+    }
+    const rows = list.length
+      ? list
+          .map(
+            (r, i) =>
+              `<tr><td>${i + 1}</td><td>${esc(r.nickname || '无名矿工')}</td><td>第 ${r.level} 关</td><td>$${r.money}</td></tr>`
+          )
+          .join('')
+      : '<tr><td colspan="4">虚位以待</td></tr>';
+    this.showOverlay(`
+      <div class="card">
+        <h2>🏆 全球排行榜（Top 20）</h2>
+        <table class="board"><tr><th>#</th><th>矿工</th><th>到达</th><th>资产</th></tr>${rows}</table>
+        <button class="btn" data-action="menu">返回</button>
       </div>`);
   }
 
