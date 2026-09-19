@@ -1,5 +1,5 @@
 import { AudioEngine } from './audio';
-import { ANCHOR, HIT_RADIUS, H, LEVEL_TIME, W, targetFor } from './constants';
+import { ANCHOR, HIT_RADIUS, LEVEL_TIME, itemArea, targetFor, view } from './constants';
 import { generateLevel } from './generation';
 import { Hook } from './hook';
 import { Particles } from './particles';
@@ -109,7 +109,7 @@ export class Game {
     ctx.save();
     if (this.shake > 0)
       ctx.translate((Math.random() - 0.5) * this.shake * 10, (Math.random() - 0.5) * this.shake * 10);
-    ctx.clearRect(-20, -20, W + 40, H + 40);
+    ctx.clearRect(-20, -20, view.W + 40, view.H + 40);
     drawBackground(ctx);
     for (const t of this.items) if (!t.taken) drawTreasure(ctx, t, this.save.perm.compass);
     drawRopeAndHook(ctx, this.hook);
@@ -231,7 +231,7 @@ export class Game {
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.beginPath();
     ctx.roundRect(14, 10, 300, 66, 10);
-    ctx.roundRect(W - 290, 10, 276, 40, 10);
+    ctx.roundRect(view.W - 290, 10, 276, 40, 10);
     ctx.fill();
 
     ctx.textAlign = 'left';
@@ -245,16 +245,25 @@ export class Game {
     const barW = 250;
     const frac = this.timeLeft / this.levelTime;
     ctx.fillStyle = '#3a2a18';
-    ctx.fillRect(W - 278, 22, barW, 16);
+    ctx.fillRect(view.W - 278, 22, barW, 16);
     ctx.fillStyle = frac < 0.17 ? '#ff5c5c' : '#ffb340';
-    ctx.fillRect(W - 278, 22, barW * frac, 16);
+    ctx.fillRect(view.W - 278, 22, barW * frac, 16);
     ctx.strokeStyle = '#1c1208';
     ctx.lineWidth = 2;
-    ctx.strokeRect(W - 278, 22, barW, 16);
+    ctx.strokeRect(view.W - 278, 22, barW, 16);
     ctx.textAlign = 'right';
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 13px "Segoe UI", sans-serif';
-    ctx.fillText(`${Math.ceil(this.timeLeft)}s`, W - 20, 54);
+    ctx.fillText(`${Math.ceil(this.timeLeft)}s`, view.W - 20, 54);
+  }
+
+  onResize() {
+    const a = itemArea();
+    for (const t of this.items) {
+      if (t.taken) continue;
+      t.x = Math.min(Math.max(t.x, a.x0 + t.r), a.x1 - t.r);
+      t.y = Math.min(Math.max(t.y, a.y0 + t.r), a.y1 - t.r);
+    }
   }
 
   private onOverlayClick(e: Event) {

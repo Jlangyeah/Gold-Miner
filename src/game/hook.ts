@@ -6,8 +6,7 @@ import {
   ROPE_START,
   SWING_MAX,
   SWING_PERIOD,
-  W,
-  H,
+  view,
 } from './constants';
 import { Treasure } from './types';
 
@@ -70,7 +69,7 @@ export class Hook {
       this.len += EXTEND_SPEED * dt;
       const x = this.tipX();
       const y = this.tipY();
-      if (x < -20 || x > W + 20 || y > H + 20) {
+      if (x < -20 || x > view.W + 20 || y > view.H + 20) {
         this.phase = 'retract';
       }
       return null;

@@ -1,15 +1,20 @@
-import { ANCHOR, H, HORIZON_Y, W } from './constants';
+import { ANCHOR, HORIZON_Y, view } from './constants';
 import { Hook } from './hook';
 import { Treasure } from './types';
 
 const speckles: { x: number; y: number; r: number; a: number }[] = [];
-{
+let specklesH = -1;
+
+function ensureSpeckles() {
+  if (specklesH === view.H) return;
+  specklesH = view.H;
+  speckles.length = 0;
   let s = 12345;
   const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
   for (let i = 0; i < 130; i++) {
     speckles.push({
-      x: rnd() * W,
-      y: HORIZON_Y + 20 + rnd() * (H - HORIZON_Y - 30),
+      x: rnd() * view.W,
+      y: HORIZON_Y + 20 + rnd() * (view.H - HORIZON_Y - 30),
       r: 1.5 + rnd() * 3.5,
       a: 0.08 + rnd() * 0.15,
     });
@@ -17,11 +22,12 @@ const speckles: { x: number; y: number; r: number; a: number }[] = [];
 }
 
 export function drawBackground(ctx: CanvasRenderingContext2D) {
+  ensureSpeckles();
   const sky = ctx.createLinearGradient(0, 0, 0, HORIZON_Y);
   sky.addColorStop(0, '#8ecdea');
   sky.addColorStop(1, '#d8efb8');
   ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, W, HORIZON_Y);
+  ctx.fillRect(0, 0, view.W, HORIZON_Y);
 
   ctx.fillStyle = '#ffe27a';
   ctx.beginPath();
@@ -30,9 +36,9 @@ export function drawBackground(ctx: CanvasRenderingContext2D) {
 
   ctx.fillStyle = 'rgba(255,255,255,0.9)';
   for (const [cx, cy, sc] of [
-    [700, 45, 1],
-    [840, 75, 0.75],
-    [300, 40, 0.85],
+    [view.W * 0.73, 45, 1],
+    [view.W * 0.88, 75, 0.75],
+    [view.W * 0.31, 40, 0.85],
   ] as const) {
     ctx.beginPath();
     ctx.arc(cx, cy, 20 * sc, 0, Math.PI * 2);
@@ -42,13 +48,13 @@ export function drawBackground(ctx: CanvasRenderingContext2D) {
   }
 
   ctx.fillStyle = '#6aaa3c';
-  ctx.fillRect(0, HORIZON_Y - 10, W, 14);
+  ctx.fillRect(0, HORIZON_Y - 10, view.W, 14);
 
-  const dirt = ctx.createLinearGradient(0, HORIZON_Y, 0, H);
+  const dirt = ctx.createLinearGradient(0, HORIZON_Y, 0, view.H);
   dirt.addColorStop(0, '#8a5a30');
   dirt.addColorStop(1, '#4a2c15');
   ctx.fillStyle = dirt;
-  ctx.fillRect(0, HORIZON_Y + 4, W, H - HORIZON_Y);
+  ctx.fillRect(0, HORIZON_Y + 4, view.W, view.H - HORIZON_Y);
 
   for (const sp of speckles) {
     ctx.fillStyle = `rgba(30,15,5,${sp.a})`;
@@ -57,7 +63,6 @@ export function drawBackground(ctx: CanvasRenderingContext2D) {
     ctx.fill();
   }
 
-  const mount = ctx.createLinearGradient(380, 0, 620, 0);
   ctx.fillStyle = '#b98d4f';
   ctx.beginPath();
   ctx.moveTo(ANCHOR.x - 130, HORIZON_Y + 4);

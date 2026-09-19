@@ -14,12 +14,10 @@ body {
 }
 
 #wrap {
-  position: relative;
-  width: min(100vw, calc(100vh * 16 / 9));
-  aspect-ratio: 16 / 9;
-  margin: auto;
+  position: fixed;
+  left: 50%;
   top: 50%;
-  transform: translateY(-50%);
+  transform: translate(-50%, -50%);
 }
 
 #stage {
@@ -143,44 +141,4 @@ body {
 .mute-row {
   margin-top: 10px;
   font-size: 14px;
-}
-
-#rotate {
-  display: none;
-  position: fixed;
-  inset: 0;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  color: #f3ddb0;
-  font-size: 20px;
-  text-align: center;
-  background: #1a1208;
-  z-index: 100;
-}
-
-#rotate div {
-  font-size: 64px;
-  animation: rot 1.6s ease-in-out infinite;
-}
-
-@keyframes rot {
-  0%,
-  20% {
-    transform: rotate(0deg);
-  }
-  60%,
-  100% {
-    transform: rotate(90deg);
-  }
-}
-
-@media (orientation: portrait) and (max-width: 768px) {
-  #wrap {
-    display: none;
-  }
-  #rotate {
-    display: flex;
-  }
 }

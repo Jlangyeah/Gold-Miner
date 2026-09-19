@@ -1,4 +1,4 @@
-import { ITEM_AREA } from './constants';
+import { itemArea } from './constants';
 import { KIND_SPEC, Treasure, TreasureKind } from './types';
 
 let nextId = 1;
@@ -34,12 +34,13 @@ function jaggedPoints(r: number) {
 
 export function generateLevel(level: number, luck: number): Treasure[] {
   const items: Treasure[] = [];
+  const area = itemArea();
   const count = 15 + Math.min(level, 6);
   let guard = 0;
   while (items.length < count && guard++ < count * 60) {
-    const x = rand(ITEM_AREA.x0, ITEM_AREA.x1);
-    const y = rand(ITEM_AREA.y0, ITEM_AREA.y1);
-    const depth = (y - ITEM_AREA.y0) / (ITEM_AREA.y1 - ITEM_AREA.y0);
+    const x = rand(area.x0, area.x1);
+    const y = rand(area.y0, area.y1);
+    const depth = (y - area.y0) / (area.y1 - area.y0);
     const kind = pickKind(depth, level, luck);
     const spec = KIND_SPEC[kind];
     const r = spec.r;
