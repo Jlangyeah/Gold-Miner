@@ -2,8 +2,13 @@ import { AudioEngine } from './audio';
 import {
   cloudDownload,
   cloudUpload,
+  DEFAULT_NICK,
+  displayNick,
   fetchLeaderboard,
+  formatWhen,
+  NICK_MAX,
   nickname,
+  playerId,
   setNickname,
   submitScore,
 } from './cloud';
@@ -198,7 +203,7 @@ export class Game {
       writeSave(this.save);
       this.state = 'result';
       this.audio.win();
-      submitScore(this.level, this.money, nickname());
+      submitScore(this.level, this.money, this.currentNick());
       this.showResult(true);
     } else {
       this.state = 'result';
@@ -297,7 +302,9 @@ export class Game {
 
   private async doCloudUpload() {
     this.setStatus('上传中…');
-    const ok = await cloudUpload(this.save, this.readNick());
+    const nick = this.currentNick();
+    this.save.nickname = nickname();
+    const ok = await cloudUpload(this.save, nick);
     this.setStatus(ok ? '✅ 已上传到云端' : '❌ 上传失败，请检查网络');
   }
 
@@ -310,6 +317,7 @@ export class Game {
     }
     this.save = d;
     writeSave(d);
+    if (d.nickname) setNickname(d.nickname);
     this.showMenu('✅ 已恢复云端存档');
   }
 
@@ -339,13 +347,14 @@ export class Game {
   private showMenu(msg = '') {
     this.state = 'menu';
     const cont = this.save.level > 1 ? `继续 · 第 ${this.save.level} 关` : '开始游戏';
+    const nick = nickname();
     this.showOverlay(`
       <div class="card">
         <h1>⛏️ 黄金矿工</h1>
         <p>经典玩法复刻 · 点击/空格 放钩</p>
         <p>最高纪录：${this.save.high ? `第 <b>${this.save.high}</b> 关` : '暂无'} · 存款 <b>$${this.save.money}</b></p>
         <button class="btn" data-action="start">${cont}</button>
-        <p style="margin-top:12px"><input id="nick" class="nick" maxlength="12" placeholder="你的矿工名" value="${esc(nickname())}"></p>
+        <p style="margin-top:12px"><input id="nick" class="nick" maxlength="${NICK_MAX}" placeholder="${DEFAULT_NICK}" value="${esc(nick)}" autocomplete="off"></p>
         <div class="cloud-row">
           <button class="btn small" data-action="cloud-up">☁️ 上传存档</button>
           <button class="btn small" data-action="cloud-down">☁️ 读取存档</button>
@@ -354,13 +363,41 @@ export class Game {
         <p id="cloud-status" class="cloud-status">${esc(msg)}</p>
         <div class="mute-row"><button class="btn small" data-action="mute">🔊 音效：${this.save.mute ? '关' : '开'}（M）</button></div>
       </div>`);
+    this.bindNickInput();
   }
 
-  private readNick(): string {
+  /** 输入即存，避免用户没点任何按钮就直接开始游戏导致昵称丢失 */
+  private bindNickInput() {
     const el = document.getElementById('nick') as HTMLInputElement | null;
-    const v = el?.value?.trim() ?? '';
-    setNickname(v);
-    return v || '无名矿工';
+    if (!el) return;
+    const commit = () => this.saveNick(el.value);
+    el.addEventListener('input', commit);
+    el.addEventListener('change', commit);
+    el.addEventListener('blur', commit);
+    // 回车直接开局
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        commit();
+        this.audio.ensure();
+        this.startLevel();
+      }
+    });
+  }
+
+  private saveNick(raw: string) {
+    setNickname(raw);
+    const v = nickname();
+    if (this.save.nickname !== v) {
+      this.save.nickname = v;
+      writeSave(this.save);
+    }
+  }
+
+  /** 提交/展示时统一取当前昵称，避免拿到空值或过期值 */
+  private currentNick(): string {
+    const el = document.getElementById('nick') as HTMLInputElement | null;
+    if (el) this.saveNick(el.value);
+    return displayNick(nickname());
   }
 
   private setStatus(text: string) {
@@ -370,6 +407,7 @@ export class Game {
 
   private async showLeaderboard() {
     this.state = 'menu';
+    const nick = this.currentNick();
     this.showOverlay('<div class="card"><h2>🏆 全球排行榜</h2><p>加载中…</p></div>');
     const list = await fetchLeaderboard();
     if (list === null) {
@@ -378,18 +416,32 @@ export class Game {
       );
       return;
     }
+    const myId = playerId();
     const rows = list.length
       ? list
-          .map(
-            (r, i) =>
-              `<tr><td>${i + 1}</td><td>${esc(r.nickname || '无名矿工')}</td><td>第 ${r.level} 关</td><td>$${r.money}</td></tr>`
-          )
+          .map((r, i) => {
+            const name = displayNick(r.nickname || '');
+            const me = !!r.playerId && r.playerId === myId;
+            return `<tr class="${me ? 'me' : ''}"><td>${i + 1}</td><td>${esc(name)}${
+              me ? ' <span class="you">你</span>' : ''
+            }</td><td>第 ${r.level} 关</td><td>$${r.money}</td><td class="when">${formatWhen(
+              r.updatedAt
+            )}</td></tr>`;
+          })
           .join('')
-      : '<tr><td colspan="4">虚位以待</td></tr>';
+      : '<tr><td colspan="5">虚位以待</td></tr>';
+    const onBoard = list.some((r) => !!r.playerId && r.playerId === myId);
     this.showOverlay(`
       <div class="card">
         <h2>🏆 全球排行榜（Top 20）</h2>
-        <table class="board"><tr><th>#</th><th>矿工</th><th>到达</th><th>资产</th></tr>${rows}</table>
+        <table class="board"><tr><th>#</th><th>矿工</th><th>到达</th><th>资产</th><th>时间</th></tr>${rows}</table>
+        <p class="board-tip">你的名字：<b>${esc(nick)}</b>${
+          onBoard
+            ? ''
+            : nick === DEFAULT_NICK
+              ? '（回主页填写矿工名，过关后即可上榜）'
+              : '（还没有上榜记录，过关后自动提交）'
+        }</p>
         <button class="btn" data-action="menu">返回</button>
       </div>`);
   }

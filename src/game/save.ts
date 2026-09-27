@@ -4,6 +4,7 @@ export interface SaveData {
   money: number;
   high: number;
   mute: boolean;
+  nickname: string;
   pending: { coffee: number; speed: number; tnt: number };
   perm: { compass: boolean; ball: boolean; clover: boolean };
 }
@@ -16,6 +17,7 @@ export const defaultSave = (): SaveData => ({
   money: 0,
   high: 0,
   mute: false,
+  nickname: '',
   pending: { coffee: 0, speed: 0, tnt: 0 },
   perm: { compass: false, ball: false, clover: false },
 });
@@ -44,6 +46,7 @@ export function clearProgress(d: SaveData): SaveData {
   const keep = defaultSave();
   keep.high = d.high;
   keep.mute = d.mute;
+  keep.nickname = d.nickname;
   writeSave(keep);
   return keep;
 }

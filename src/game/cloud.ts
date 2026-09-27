@@ -14,12 +14,19 @@ export function playerId(): string {
   return id;
 }
 
+export const DEFAULT_NICK = '无名矿工';
+export const NICK_MAX = 12;
+
+/** 按码点截断，避免把 emoji 等代理对切成半个字符 */
+const cut = (s: string, max: number) => Array.from(s).slice(0, max).join('');
+
+/** localStorage 是唯一事实来源；存档里的昵称仅作跨设备恢复 */
 export function nickname(): string {
-  return localStorage.getItem(NICK_KEY) || '无名矿工';
+  return localStorage.getItem(NICK_KEY) || '';
 }
 
 export function setNickname(n: string) {
-  localStorage.setItem(NICK_KEY, n.slice(0, 12));
+  localStorage.setItem(NICK_KEY, cut(n.trim(), NICK_MAX));
 }
 
 export async function cloudUpload(save: SaveData, nick: string): Promise<boolean> {
@@ -47,6 +54,8 @@ export async function cloudDownload(): Promise<SaveData | null> {
   }
 }
 
+export const displayNick = (n: string) => n || DEFAULT_NICK;
+
 export async function submitScore(level: number, money: number, nick: string) {
   try {
     await fetch('/api/score', {
@@ -60,9 +69,11 @@ export async function submitScore(level: number, money: number, nick: string) {
 }
 
 export interface BoardRow {
+  playerId?: string | null;
   nickname: string | null;
   level: number;
   money: number;
+  updatedAt?: number | null;
 }
 
 export async function fetchLeaderboard(): Promise<BoardRow[] | null> {
@@ -72,4 +83,19 @@ export async function fetchLeaderboard(): Promise<BoardRow[] | null> {
   } catch {
     return null;
   }
+}
+
+/** 排行榜时间列：今天显示时分，更早显示日期 */
+export function formatWhen(ts?: number | null): string {
+  if (!ts || !Number.isFinite(ts)) return '—';
+  const d = new Date(ts);
+  const p = (n: number) => String(n).padStart(2, '0');
+  const today = new Date();
+  const sameDay =
+    d.getFullYear() === today.getFullYear() &&
+    d.getMonth() === today.getMonth() &&
+    d.getDate() === today.getDate();
+  return sameDay
+    ? `今天 ${p(d.getHours())}:${p(d.getMinutes())}`
+    : `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }

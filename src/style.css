@@ -190,3 +190,29 @@ table.board td {
 table.board th {
   color: #8a5c07;
 }
+
+table.board td.when {
+  color: #8a6a3a;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+table.board tr.me {
+  background: #fff3cd;
+}
+
+.you {
+  display: inline-block;
+  margin-left: 2px;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: #e8a33d;
+  color: #fff;
+  font-size: 11px;
+  vertical-align: 1px;
+}
+
+.board-tip {
+  font-size: 12px;
+  color: #8a6a3a;
+}
