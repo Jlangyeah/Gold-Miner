@@ -21,3 +21,13 @@ export const itemArea = () => ({
 
 export const targetFor = (level: number) =>
   Math.round((500 + 280 * level + 18 * level * level) / 10) * 10;
+
+export const isBonusLevel = (level: number) => level > 1 && level % 3 === 0;
+
+/** 奖励关没有石头拖慢节奏，时限也更短，所以目标改成「本关再挖多少」 */
+export const bonusGoalFor = (level: number) => Math.round((400 + 180 * level) / 10) * 10;
+
+export const BONUS_TIME = 45;
+
+export const levelTarget = (level: number, money: number) =>
+  isBonusLevel(level) ? money + bonusGoalFor(level) : targetFor(level);

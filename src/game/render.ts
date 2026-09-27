@@ -103,6 +103,15 @@ export function drawTreasure(ctx: CanvasRenderingContext2D, t: Treasure, showVal
     case 'bone':
       drawBone(ctx, t.r);
       break;
+    case 'nugget':
+      drawNugget(ctx, t.r);
+      break;
+    case 'rat':
+      drawRat(ctx, t);
+      break;
+    case 'magnet':
+      drawMagnet(ctx, t.r);
+      break;
   }
   ctx.restore();
   if (showValue && t.value > 0) {
@@ -242,6 +251,81 @@ function drawBone(ctx: CanvasRenderingContext2D, r: number) {
     ctx.fill();
   }
   ctx.lineCap = 'butt';
+}
+
+function drawNugget(ctx: CanvasRenderingContext2D, r: number) {
+  const g = ctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.1, 0, 0, r);
+  g.addColorStop(0, '#fff6c8');
+  g.addColorStop(1, '#d8991a');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#8a5c07';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = '#8a5c07';
+  ctx.font = `bold ${r * 1.2}px "Segoe UI", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText('¢', 0, r * 0.45);
+}
+
+function drawRat(ctx: CanvasRenderingContext2D, t: Treasure) {
+  const r = t.r;
+  const facing = (t.vx ?? 1) >= 0 ? 1 : -1;
+  ctx.save();
+  ctx.scale(facing, 1);
+  ctx.strokeStyle = '#c99a9a';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.9, 0);
+  ctx.quadraticCurveTo(-r * 1.5, -r * 0.5, -r * 1.7, Math.sin(performance.now() / 150) * r * 0.4);
+  ctx.stroke();
+  ctx.fillStyle = '#7d7568';
+  ctx.beginPath();
+  ctx.ellipse(0, r * 0.1, r, r * 0.62, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(r * 0.75, -r * 0.15, r * 0.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#9a8f80';
+  ctx.beginPath();
+  ctx.arc(r * 0.55, -r * 0.6, r * 0.32, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#ff9db0';
+  ctx.beginPath();
+  ctx.arc(r * 0.5, -r * 0.62, r * 0.16, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#1c1208';
+  ctx.beginPath();
+  ctx.arc(r * 0.92, -r * 0.18, 2.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#ff9db0';
+  ctx.beginPath();
+  ctx.arc(r * 1.22, -r * 0.05, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawMagnet(ctx: CanvasRenderingContext2D, r: number) {
+  ctx.strokeStyle = '#d0342c';
+  ctx.lineWidth = r * 0.7;
+  ctx.lineCap = 'butt';
+  ctx.beginPath();
+  ctx.arc(0, -r * 0.15, r * 0.75, Math.PI, 0);
+  ctx.stroke();
+  ctx.strokeStyle = '#e8e8e8';
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.75, -r * 0.15);
+  ctx.lineTo(-r * 0.75, r * 0.6);
+  ctx.moveTo(r * 0.75, -r * 0.15);
+  ctx.lineTo(r * 0.75, r * 0.6);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(0, -r * 0.15, r * 1.15, Math.PI * 1.15, -Math.PI * 0.15);
+  ctx.stroke();
 }
 
 export function drawRopeAndHook(ctx: CanvasRenderingContext2D, hook: Hook) {

@@ -19,15 +19,20 @@ export class Hook {
   len = ROPE_START;
   dirX = 0;
   dirY = 1;
-  attached: Treasure | null = null;
+  /** 钩上串着的物品，第一件决定行为（TNT 引信、抓空判定） */
+  carry: Treasure[] = [];
   fuse = -1;
   speedMul = 1;
+
+  get attached(): Treasure | null {
+    return this.carry[0] ?? null;
+  }
 
   reset() {
     this.phase = 'swing';
     this.t = Math.random() * SWING_PERIOD;
     this.len = ROPE_START;
-    this.attached = null;
+    this.carry = [];
     this.fuse = -1;
   }
 
@@ -46,14 +51,17 @@ export class Hook {
     this.phase = 'extend';
   }
 
-  attach(item: Treasure) {
-    this.attached = item;
+  grab(item: Treasure) {
+    this.carry.push(item);
     this.phase = 'retract';
-    if (item.kind === 'tnt') this.fuse = 3;
+    // 咬住瞬间再往前冲一点，让成片的宝物有机会一起被兜住
+    if (this.carry.length === 1) this.len += 22;
+    if (item === this.carry[0] && item.kind === 'tnt') this.fuse = 3;
   }
 
   retractSpeed(): number {
-    const w = this.attached ? this.attached.weight : 0;
+    let w = 0;
+    for (const t of this.carry) w += t.weight;
     return (RETRACT_BASE * this.speedMul) / (1 + 0.45 * w);
   }
 

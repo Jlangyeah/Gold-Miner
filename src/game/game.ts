@@ -12,8 +12,20 @@ import {
   setNickname,
   submitScore,
 } from './cloud';
-import { ANCHOR, HIT_RADIUS, LEVEL_TIME, itemArea, targetFor, view } from './constants';
-import { generateLevel } from './generation';
+import {
+  ANCHOR,
+  BONUS_TIME,
+  HIT_RADIUS,
+  LEVEL_TIME,
+  ROPE_MIN,
+  bonusGoalFor,
+  isBonusLevel,
+  itemArea,
+  levelTarget,
+  targetFor,
+  view,
+} from './constants';
+import { generateLevel, spawnVein } from './generation';
 import { Hook } from './hook';
 import { Particles } from './particles';
 import {
@@ -23,7 +35,7 @@ import {
   drawTreasure,
 } from './render';
 import { SaveData, clearProgress, loadSave, writeSave } from './save';
-import { Treasure } from './types';
+import { RAT_REWARDS, Treasure, TreasureKind } from './types';
 
 type State = 'menu' | 'playing' | 'result' | 'shop';
 
@@ -49,6 +61,23 @@ const SHOP: ShopEntry[] = [
   { key: 'clover', name: '🍀 幸运草', desc: '永久提高钻石与钱袋出现率', price: 320, perm: true },
 ];
 
+const MAX_CARRY = 5;
+/** 收线途中顺路带走轻质宝物上限 */
+const CHAIN_MAX_WEIGHT = 2.5;
+/** 钩上串着东西时粘取半径更宽（一大束在土里拖，会带出旁边的小宝物） */
+const CHAIN_RADIUS = 22;
+const MAGNET_RADIUS = 150;
+const RAT_SPEED = 70;
+
+const comboGroup = (kind: TreasureKind): string =>
+  kind.startsWith('gold') || kind === 'nugget'
+    ? 'gold'
+    : kind === 'diamond' || kind === 'bone'
+      ? 'gem'
+      : kind.startsWith('rock')
+        ? 'rock'
+        : kind;
+
 export class Game {
   private ctx: CanvasRenderingContext2D;
   private overlay: HTMLElement;
@@ -67,6 +96,13 @@ export class Game {
   private items: Treasure[] = [];
   private lastSec = -1;
   private shake = 0;
+  private combo = 0;
+  private comboGroupKey: string | null = null;
+  private comboTimer = 0;
+  private doubleTimer = 0;
+  private banner = '';
+  private bannerTimer = 0;
+  private bonusPay = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -105,20 +141,28 @@ export class Game {
       this.lastSec = sec;
       if (sec <= 10 && sec > 0) this.audio.tick();
     }
+    if (this.doubleTimer > 0) this.doubleTimer = Math.max(0, this.doubleTimer - dt);
+    if (this.comboTimer > 0) {
+      this.comboTimer = Math.max(0, this.comboTimer - dt);
+      if (this.comboTimer === 0) this.combo = 0;
+    }
+    if (this.bannerTimer > 0) this.bannerTimer = Math.max(0, this.bannerTimer - dt);
     if (this.timeLeft <= 0) {
       this.timeLeft = 0;
       this.endLevel();
       return;
     }
 
+    this.moveRats(dt);
     const evt = this.hook.update(dt);
+    this.layoutCarry();
 
-    if (this.hook.phase === 'extend') this.checkHits();
-    if (this.hook.attached?.kind === 'tnt' && this.hook.phase === 'retract')
-      this.updateTnt(dt);
+    if (this.hook.phase === 'extend' || this.hook.phase === 'retract') this.checkHits();
+    if (this.hook.attached?.kind === 'tnt' && this.hook.phase === 'retract') this.updateTnt(dt);
     if (evt === 'release') {
-      if (this.hook.attached) this.collect(this.hook.attached);
-      this.hook.attached = null;
+      if (this.hook.carry.length) this.collectAll(this.hook.carry);
+      else this.combo = 0;
+      this.hook.carry = [];
     }
   }
 
@@ -131,71 +175,226 @@ export class Game {
     drawBackground(ctx);
     for (const t of this.items) if (!t.taken) drawTreasure(ctx, t, this.save.perm.compass);
     drawRopeAndHook(ctx, this.hook);
+    const swing = Math.sin(performance.now() / 130) * 0.05;
+    for (const t of this.hook.carry) {
+      ctx.save();
+      ctx.translate(t.x, t.y);
+      ctx.rotate(swing);
+      ctx.translate(-t.x, -t.y);
+      drawTreasure(ctx, t, false);
+      ctx.restore();
+    }
     drawMiner(ctx, this.hook);
     this.particles.draw(ctx);
     ctx.restore();
     if (this.state === 'playing' || this.state === 'result') this.drawHud(ctx);
   }
 
+  private moveRats(dt: number) {
+    for (const t of this.items) {
+      if (t.taken || t.kind !== 'rat') continue;
+      const x0 = t.x0 ?? t.x;
+      const x1 = t.x1 ?? t.x;
+      t.vx ??= 1;
+      t.x += t.vx * RAT_SPEED * dt;
+      if (t.x <= x0) {
+        t.x = x0;
+        t.vx = 1;
+      } else if (t.x >= x1) {
+        t.x = x1;
+        t.vx = -1;
+      }
+    }
+  }
+
+  /** 钩上的物品沿绳索依次排开，形成「一串」的视觉效果 */
+  private layoutCarry() {
+    const h = this.hook;
+    if (!h.carry.length) return;
+    let back = 0;
+    for (const t of h.carry) {
+      const d = Math.max(ROPE_MIN - 6, h.len - back);
+      t.x = ANCHOR.x + h.dirX * d;
+      t.y = ANCHOR.y + h.dirY * d;
+      back += Math.max(12, t.r * 0.9);
+    }
+  }
+
   private checkHits() {
-    const tx = this.hook.tipX();
-    const ty = this.hook.tipY();
+    const h = this.hook;
+    const tx = h.tipX();
+    const ty = h.tipY();
     for (const t of this.items) {
       if (t.taken) continue;
-      if (Math.hypot(t.x - tx, t.y - ty) < t.r + HIT_RADIUS) {
-        t.taken = true;
-        this.hook.attach(t);
-        this.audio.hit();
-        return;
+      const reach = t.r + (h.carry.length ? CHAIN_RADIUS : HIT_RADIUS);
+      if (Math.hypot(t.x - tx, t.y - ty) > reach) continue;
+      if (h.carry.length) {
+        // 连抓：挂着的那一串会刮走两侧轻质宝物；重物与 TNT 不粘钩，直接跳过继续找
+        if (h.carry.length >= MAX_CARRY) return;
+        if (t.weight > CHAIN_MAX_WEIGHT || t.kind === 'tnt') continue;
       }
+      t.taken = true;
+      t.ox = t.x;
+      t.oy = t.y;
+      h.grab(t);
+      this.audio.hit();
+      if (t.kind === 'magnet') this.magnetSuck(t);
+      return;
+    }
+  }
+
+  /** 磁铁：把附近宝物直接吸上钩 */
+  private magnetSuck(src: Treasure) {
+    let n = 0;
+    for (const other of this.items) {
+      if (other.taken || other.kind === 'tnt' || other.kind.startsWith('rock')) continue;
+      if (Math.hypot(other.x - src.x, other.y - src.y) > MAGNET_RADIUS) continue;
+      if (this.hook.carry.length >= MAX_CARRY) break;
+      other.taken = true;
+      this.hook.carry.push(other);
+      this.particles.burst(other.x, other.y, '#8ec8ff', 6, 90);
+      n++;
+    }
+    if (n) {
+      this.particles.floatText(src.x, src.y - 28, `🧲 吸走 ${n} 件!`, '#8ec8ff');
+      this.particles.burst(src.x, src.y, '#8ec8ff', 14, 160);
     }
   }
 
   private updateTnt(dt: number) {
     this.hook.fuse -= dt;
     if (this.hook.fuse > 0) return;
-    const t = this.hook.attached!;
     const x = this.hook.tipX();
     const y = this.hook.tipY();
-    t.value = 0;
-    this.hook.attached = null;
+    for (const t of this.hook.carry) {
+      t.value = 0;
+      this.particles.floatText(t.x, t.y, '报废…', '#ff9d9d');
+    }
+    this.hook.carry = [];
     this.hook.fuse = -1;
     this.audio.explode();
     this.shake = 1;
     this.particles.burst(x, y, '#ff8c2e', 26, 260, 6);
     this.particles.burst(x, y, '#5a5a5a', 18, 150, 8);
     for (const other of this.items) {
-      if (other.taken || other === t) continue;
+      if (other.taken) continue;
       if (Math.hypot(other.x - x, other.y - y) < 95) {
         other.taken = true;
-        if (other.value > 0)
-          this.particles.floatText(other.x, other.y, '报废…', '#ff9d9d');
+        if (other.value > 0) this.particles.floatText(other.x, other.y, '报废…', '#ff9d9d');
       }
     }
     this.particles.floatText(x, y - 24, 'BOOM!', '#ff5c5c');
+    this.combo = 0;
+  }
+
+  /** 连击倍率：连续同类收获递增 */
+  private comboMul(): number {
+    return this.combo >= 3 ? Math.min(3, 1 + 0.25 * (this.combo - 2)) : 1;
+  }
+
+  private bumpCombo(t: Treasure) {
+    const g = comboGroup(t.kind);
+    this.combo = g === this.comboGroupKey ? this.combo + 1 : 1;
+    this.comboGroupKey = g;
+    this.comboTimer = 6;
+    if (this.combo >= 3) {
+      const mul = this.comboMul();
+      this.particles.floatText(
+        this.hook.tipX(),
+        this.hook.tipY() - 30,
+        `连击 ×${this.combo} · 金额 ×${mul.toFixed(2)}`,
+        '#ff9dff'
+      );
+    }
+  }
+
+  private collectAll(carry: Treasure[]) {
+    for (const t of carry) this.collect(t);
   }
 
   private collect(t: Treasure) {
-    if (t.kind === 'tnt') {
-      this.particles.floatText(ANCHOR.x + 60, ANCHOR.y + 20, '拆除成功!', '#9dff8c');
-      return;
+    this.bumpCombo(t);
+    const mul = this.comboMul() * (this.doubleTimer > 0 ? 2 : 1);
+    const label = this.doubleTimer > 0 && this.combo < 3 ? ' ×2' : '';
+
+    switch (t.kind) {
+      case 'tnt':
+        this.particles.floatText(ANCHOR.x + 60, ANCHOR.y + 20, '拆除成功!', '#9dff8c');
+        return;
+      case 'rat': {
+        const prize = RAT_REWARDS[Math.floor(Math.random() * RAT_REWARDS.length)];
+        this.addMoney(prize * mul, '#b6ff8c', `🐀 老鼠赏金 +$${Math.round(prize * mul)}`);
+        this.audio.coin(prize);
+        this.showBanner(`🐀 抓到矿工鼠！赏金 $${prize}${mul > 1 ? '（加成后更多）' : ''}`);
+        return;
+      }
+      case 'magnet':
+        this.showBanner('🧲 磁铁把附近的宝物一起吸上钩了');
+        return;
+      case 'bag':
+        this.addMoney(t.value * mul, '#ffd23e', '+$' + Math.round(t.value * mul));
+        this.audio.coin(t.value);
+        this.bagReward(t);
+        return;
+      case 'rock_s':
+      case 'rock_l':
+        this.audio.rock();
+        this.addMoney(t.value * mul, '#c8c8c8', '+$' + Math.round(t.value * mul));
+        return;
+      default:
+        this.audio.coin(t.value);
+        this.addMoney(t.value * mul, '#ffd23e', '+$' + Math.round(t.value * mul) + label);
+        this.particles.burst(ANCHOR.x + 60, ANCHOR.y + 30, '#ffd23e', 10, 120);
     }
-    this.money += t.value;
+  }
+
+  private addMoney(amount: number, color: string, text: string) {
+    const v = Math.round(amount);
+    this.money += v;
     this.save.money = this.money;
     writeSave(this.save);
-    if (t.kind === 'rock_s' || t.kind === 'rock_l') {
-      this.audio.rock();
-      this.particles.floatText(ANCHOR.x + 60, ANCHOR.y + 20, `+$${t.value}`, '#c8c8c8');
+    this.particles.floatText(ANCHOR.x + 60, ANCHOR.y + 20, text, color);
+  }
+
+  /** 幸运钱袋：随机开出时间 / 双倍财富 / 金矿脉 */
+  private bagReward(t: Treasure) {
+    const roll = Math.random();
+    if (roll < 0.3) {
+      this.timeLeft += 10;
+      this.levelTime = Math.max(this.levelTime, this.timeLeft);
+      this.showBanner('💰 钱袋里是怀表：+10 秒！');
+      this.particles.floatText(t.x, t.y - 20, '+10s', '#9dff8c');
+    } else if (roll < 0.6) {
+      this.doubleTimer = 20;
+      this.showBanner('💰 钱袋里是双钞票：20 秒内金额翻倍！');
+      this.particles.floatText(t.x, t.y - 20, '×2 财富', '#ff9dff');
     } else {
-      this.audio.coin(t.value);
-      this.particles.floatText(ANCHOR.x + 60, ANCHOR.y + 20, `+$${t.value}`, '#ffd23e');
-      this.particles.burst(ANCHOR.x + 60, ANCHOR.y + 30, '#ffd23e', 10, 120);
+      const vein = spawnVein(t.ox ?? t.x, t.oy ?? t.y, this.items);
+      this.items.push(...vein);
+      this.showBanner(`💰 钱袋里是金矿脉图：散落 ${vein.length} 块金粒！`);
+      for (const v of vein) this.particles.burst(v.x, v.y, '#ffd23e', 4, 70);
     }
+  }
+
+  private showBanner(text: string) {
+    this.banner = text;
+    this.bannerTimer = 2.6;
   }
 
   private endLevel() {
     this.audio.stopBgm();
+    // 时间到也先把钩上的东西结算掉，避免最后一秒到手的宝物凭空消失
+    if (this.hook.carry.length) {
+      this.collectAll(this.hook.carry);
+      this.hook.carry = [];
+    }
     if (this.money >= this.target) {
+      if (isBonusLevel(this.level)) {
+        const bonus = 400 + 150 * this.level;
+        this.money += bonus;
+        this.save.money = this.money;
+        this.bonusPay = bonus;
+      }
       this.save.level = this.level + 1;
       if (this.save.level > this.save.high) {
         this.save.high = this.save.level;
@@ -219,19 +418,29 @@ export class Game {
     this.level = lv;
     this.money = this.save.money;
     this.startMoney = this.money;
-    this.target = targetFor(lv);
-    this.levelTime = LEVEL_TIME + 15 * this.save.pending.coffee;
+    this.target = levelTarget(lv, this.money);
+    const bonus = isBonusLevel(lv);
+    this.levelTime = (bonus ? BONUS_TIME : LEVEL_TIME) + 15 * this.save.pending.coffee;
     this.timeLeft = this.levelTime;
     this.hook.speedMul = Math.min(2.2, Math.pow(1.4, this.save.pending.speed));
     const tntCount = this.save.pending.tnt;
     this.save.pending = { coffee: 0, speed: 0, tnt: 0 };
     writeSave(this.save);
+    this.combo = 0;
+    this.comboGroupKey = null;
+    this.comboTimer = 0;
+    this.doubleTimer = 0;
+    this.bannerTimer = 0;
+    this.bonusPay = 0;
+    this.lastSec = -1;
     this.items = generateLevel(lv, this.save.perm.clover ? 1 : 0);
     this.hook.reset();
     this.state = 'playing';
     this.hideOverlay();
     this.audio.ensure();
     if (!this.audio.muted) this.audio.startBgm();
+    if (bonus)
+      this.showBanner(`🎁 奖励关！${BONUS_TIME} 秒内再挖 $${bonusGoalFor(lv)}，过关有额外奖金`);
     if (tntCount > 0) {
       const rock = this.items
         .filter((t) => !t.taken && t.kind.startsWith('rock'))
@@ -259,10 +468,14 @@ export class Game {
     ctx.fillText(`$${this.money}`, 28, 40);
     ctx.font = '15px "Segoe UI", sans-serif';
     ctx.fillStyle = '#fff';
-    ctx.fillText(`第 ${this.level} 关 · 目标 $${this.target}`, 28, 64);
+    ctx.fillText(
+      `第 ${this.level} 关${isBonusLevel(this.level) ? ' · 🎁奖励关' : ''} · 目标 $${this.target}`,
+      28,
+      64
+    );
 
     const barW = 250;
-    const frac = this.timeLeft / this.levelTime;
+    const frac = Math.max(0, Math.min(1, this.timeLeft / this.levelTime));
     ctx.fillStyle = '#3a2a18';
     ctx.fillRect(view.W - 278, 22, barW, 16);
     ctx.fillStyle = frac < 0.17 ? '#ff5c5c' : '#ffb340';
@@ -274,6 +487,41 @@ export class Game {
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 13px "Segoe UI", sans-serif';
     ctx.fillText(`${Math.ceil(this.timeLeft)}s`, view.W - 20, 54);
+
+    const badges: string[] = [];
+    if (this.combo >= 2) badges.push(`🔥 连击 ×${this.combo}（金额 ×${this.comboMul().toFixed(2)}）`);
+    if (this.doubleTimer > 0) badges.push(`✨ 双倍财富 ${Math.ceil(this.doubleTimer)}s`);
+    if (this.hook.carry.length > 1) badges.push(`⚓ 一串 ${this.hook.carry.length} 件`);
+    if (badges.length) {
+      ctx.textAlign = 'left';
+      ctx.font = 'bold 14px "Segoe UI", sans-serif';
+      let i = 0;
+      for (const b of badges) {
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        const w = ctx.measureText(b).width + 16;
+        ctx.beginPath();
+        ctx.roundRect(14, 84 + i * 26, w, 22, 8);
+        ctx.fill();
+        ctx.fillStyle = i === 0 ? '#ff9dff' : i === 1 ? '#ffe98c' : '#9de1ff';
+        ctx.fillText(b, 22, 100 + i * 26);
+        i++;
+      }
+    }
+
+    if (this.bannerTimer > 0 && this.banner) {
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 24px "Segoe UI", sans-serif';
+      const alpha = Math.max(0, Math.min(1, this.bannerTimer / 0.6));
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      const w = ctx.measureText(this.banner).width + 40;
+      ctx.beginPath();
+      ctx.roundRect(view.W / 2 - w / 2, 96, w, 42, 12);
+      ctx.fill();
+      ctx.fillStyle = '#ffd23e';
+      ctx.fillText(this.banner, view.W / 2, 124);
+      ctx.globalAlpha = 1;
+    }
   }
 
   onResize() {
@@ -352,6 +600,7 @@ export class Game {
       <div class="card">
         <h1>⛏️ 黄金矿工</h1>
         <p>经典玩法复刻 · 点击/空格 放钩</p>
+        <p class="tips">🧲 磁铁吸走一片 · 💰 钱袋开随机奖励 · 🐀 老鼠给赏金 · 🎁 每 3 关是奖励关<br>收线途中擦过轻质宝物可连抓，连续抓同类有连击加成</p>
         <p>最高纪录：${this.save.high ? `第 <b>${this.save.high}</b> 关` : '暂无'} · 存款 <b>$${this.save.money}</b></p>
         <button class="btn" data-action="start">${cont}</button>
         <p style="margin-top:12px"><input id="nick" class="nick" maxlength="${NICK_MAX}" placeholder="${DEFAULT_NICK}" value="${esc(nick)}" autocomplete="off"></p>
@@ -447,11 +696,11 @@ export class Game {
   }
 
   private showResult(win: boolean) {
-    const earned = this.money - this.startMoney;
+    const earned = this.money - this.startMoney - this.bonusPay;
     this.showOverlay(`
       <div class="card">
-        <h2>${win ? '🎉 过关！' : '💥 时间到，未达标…'}</h2>
-        <p>本关挖到 <b>$${earned}</b> · 总资产 <b>$${this.money}</b> / 目标 $${this.target}</p>
+        <h2>${win ? isBonusLevel(this.level) ? '🎁 奖励关通关！' : '🎉 过关！' : '💥 时间到，未达标…'}</h2>
+        <p>本关挖到 <b>$${earned}</b>${this.bonusPay ? ` · 奖励金 <b style="color:#1d8348">+$${this.bonusPay}</b>` : ''} · 总资产 <b>$${this.money}</b> / 目标 $${this.target}</p>
         ${win ? '<p>带着你的金币去商店看看吧</p>' : '<p>本次冒险进度清零，卷土重来！</p>'}
         ${
           win
@@ -464,7 +713,12 @@ export class Game {
   private showShop() {
     this.state = 'shop';
     const nextLv = this.save.level;
-    const nextTarget = targetFor(nextLv);
+    const nextTarget = levelTarget(nextLv, this.money);
+    const targetTip = this.save.perm.ball
+      ? isBonusLevel(nextLv)
+        ? `（本关目标再挖 $${bonusGoalFor(nextLv)}）`
+        : `（目标 $${nextTarget}）`
+      : '';
     const rows = SHOP.map((s) => {
       const owned = s.perm
         ? (this.save.perm as any)[s.key]
@@ -478,7 +732,7 @@ export class Game {
     }).join('');
     this.showOverlay(`
       <div class="card">
-        <h2>🛒 商店 · 即将进入第 ${nextLv} 关${this.save.perm.ball ? `（目标 $${nextTarget}）` : ''}</h2>
+        <h2>🛒 商店 · 即将进入第 ${nextLv} 关${isBonusLevel(nextLv) ? ' 🎁奖励关' : ''}${targetTip}</h2>
         <p>持有金币：<b style="color:#a2740b">$${this.money}</b>${this.save.perm.ball ? '' : ' · 水晶球可预告目标'}</p>
         <div class="shop-grid">${rows}</div>
         <button class="btn" data-action="start">开始第 ${nextLv} 关 →</button>

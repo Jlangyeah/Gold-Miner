@@ -8,7 +8,10 @@ export type TreasureKind =
   | 'diamond'
   | 'bag'
   | 'tnt'
-  | 'bone';
+  | 'bone'
+  | 'nugget'
+  | 'rat'
+  | 'magnet';
 
 export interface Treasure {
   id: number;
@@ -20,6 +23,13 @@ export interface Treasure {
   weight: number;
   points: { x: number; y: number }[] | null;
   taken: boolean;
+  /** 被抓取时的原位（钩上物品会被挪走，奖励要在原位生成） */
+  ox?: number;
+  oy?: number;
+  /** 老鼠的游走范围 */
+  x0?: number;
+  x1?: number;
+  vx?: number;
 }
 
 interface KindSpec {
@@ -40,4 +50,10 @@ export const KIND_SPEC: Record<TreasureKind, KindSpec> = {
   bag: { r: 21, base: 200, weight: 1.4, vary: 0.9 },
   tnt: { r: 19, base: 0, weight: 1, vary: 0 },
   bone: { r: 27, base: 130, weight: 2.4, vary: 0.6 },
+  nugget: { r: 10, base: 55, weight: 0.3, vary: 0.3 },
+  rat: { r: 16, base: 0, weight: 0.8, vary: 0 },
+  magnet: { r: 14, base: 0, weight: 0.6, vary: 0 },
 };
+
+/** 老鼠被抓住时的稀有奖励池 */
+export const RAT_REWARDS = [300, 500, 800];

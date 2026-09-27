@@ -7,8 +7,9 @@ const game = new Game(canvas);
 (window as any).game = game;
 
 function resize() {
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
+  // 隐藏/嵌入式 webview 里 innerWidth 可能为 0，直接用作除数会得到 NaN 坐标
+  const vw = window.innerWidth || view.W;
+  const vh = window.innerHeight || view.H;
   view.W = vw < vh ? 640 : 960;
   view.H = Math.max(540, Math.min(1600, Math.round((view.W * vh) / vw)));
   ANCHOR.x = view.W / 2;
